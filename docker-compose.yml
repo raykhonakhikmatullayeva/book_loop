@@ -1,0 +1,35 @@
+services:
+  app:
+    build: .
+    container_name: book-loop-app
+    environment:
+      DB_DSN: postgres://app:pass@db:5432/book-loop
+      JWT_SECRET: super-secret-key
+      PORT: "9999"
+    ports:
+      - "9999:9999"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  db:
+    image: postgres:18-alpine
+    container_name: book-loop-db
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: pass
+      POSTGRES_DB: book-loop
+    ports:
+      - "5446:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d book-loop"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  pgdata:
