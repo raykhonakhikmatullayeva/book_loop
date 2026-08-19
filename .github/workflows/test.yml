@@ -52,10 +52,14 @@ jobs:
 
       - name: Run migrations
         run: |
-          migrate \
-            -path migrations/server \
-            -database "postgres://app:pass@localhost:5446/book_loop?sslmode=disable" \
-            up
+          if [ -z "$(ls -A migrations/server 2>/dev/null)" ]; then
+            echo "No migrations yet, skipping."
+          else
+            migrate \
+              -path migrations/server \
+              -database "postgres://app:pass@localhost:5446/book_loop?sslmode=disable" \
+              up
+          fi
 
       - name: Tests + Coverage
         env:
