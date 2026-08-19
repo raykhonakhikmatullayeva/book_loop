@@ -4,6 +4,7 @@ import (
 	"book_loop/internal/router"
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -17,6 +18,10 @@ import (
 	"github.com/joho/godotenv"
 )
 
+const (
+	shutdownTimeout = 5 * time.Second
+)
+
 // @title						AuctionHouse API
 // @version					1.0
 // @host						localhost:9999
@@ -25,6 +30,13 @@ import (
 // @in							header
 // @name						Authorization
 func main() {
+	if err := run(); err != nil {
+		slog.Error("fatal", "err", err)
+		os.Exit(1)
+	}
+}
+
+func run() error {
 	logLevel := getLoggerLevel(os.Getenv("LOG_LEVEL"))
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel}))
 	slog.SetDefault(logger)
@@ -35,16 +47,20 @@ func main() {
 	dsn := os.Getenv("DB_DSN")
 	if dsn == "" {
 		slog.Error("DB_DSN is not set")
-		os.Exit(1)
+		return errors.New("DB_DSN is not set")
 	}
 	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
 		slog.Error("connect database", "err", err)
-		os.Exit(1)
+		return fmt.Errorf("connect database: %w", err)
 	}
 	sigCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	engine, err := router.New(ctx, pool)
+	if err != nil {
+		logger.Error("create router", "err", err)
+		return fmt.Errorf("create router: %w", err)
+	}
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "9999"
@@ -53,7 +69,7 @@ func main() {
 	srv := &http.Server{
 		Addr:              addr,
 		Handler:           engine,
-		ReadHeaderTimeout: 5 * time.Second,
+		ReadHeaderTimeout: shutdownTimeout,
 	}
 	go func() {
 		if err := srv.ListenAndServe(); err != nil &&
@@ -68,7 +84,7 @@ func main() {
 	<-sigCtx.Done()
 	logger.Info("shutdown signal received")
 
-	shCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	shCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 
 	if err := srv.Shutdown(shCtx); err != nil {
@@ -79,6 +95,7 @@ func main() {
 
 	pool.Close()
 	logger.Info("shutdown")
+	return nil
 }
 
 func getLoggerLevel(level string) slog.Level {
