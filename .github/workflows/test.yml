@@ -50,12 +50,12 @@ jobs:
           | tar -xz
           sudo mv migrate /usr/local/bin/
 
-#      - name: Run migrations
-#        run: |
-#          migrate \
-#            -path migrations/server \
-#            -database "postgres://app:pass@localhost:5446/book_loop?sslmode=disable" \
-#            up
+      - name: Run migrations
+        run: |
+          migrate \
+            -path migrations/server \
+            -database "postgres://app:pass@localhost:5446/book_loop?sslmode=disable" \
+            up
 
       - name: Tests + Coverage
         env:
