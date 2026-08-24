@@ -1,7 +1,11 @@
 package main
 
 import (
+	auth3 "book_loop/internal/handler/auth"
+	"book_loop/internal/repository/auth"
+	"book_loop/internal/repository/users"
 	"book_loop/internal/router"
+	auth2 "book_loop/internal/service/auth"
 	"context"
 	"errors"
 	"fmt"
@@ -14,6 +18,7 @@ import (
 
 	_ "book_loop/docs"
 
+	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
 )
@@ -36,6 +41,7 @@ func main() {
 	}
 }
 
+//nolint:funlen
 func run() error {
 	logLevel := getLoggerLevel(os.Getenv("LOG_LEVEL"))
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel}))
@@ -56,11 +62,13 @@ func run() error {
 	}
 	sigCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	engine, err := router.New(ctx, pool)
+
+	engine, err := buildRouter(ctx, pool, logger)
 	if err != nil {
 		logger.Error("create router", "err", err)
 		return fmt.Errorf("create router: %w", err)
 	}
+
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "9999"
@@ -96,6 +104,21 @@ func run() error {
 	pool.Close()
 	logger.Info("shutdown")
 	return nil
+}
+
+func buildRouter(ctx context.Context, pool *pgxpool.Pool, logger *slog.Logger) (*gin.Engine, error) {
+	authRepo := auth.New(pool)
+	userRepo := users.New(pool)
+
+	authService := auth2.NewService(userRepo, authRepo, []byte(os.Getenv("JWT_SECRET")))
+	authHandler := auth3.New(authService, logger)
+
+	engine, err := router.New(ctx, pool, authHandler)
+	if err != nil {
+		logger.Error("create router", "err", err)
+		return nil, fmt.Errorf("create router: %w", err)
+	}
+	return engine, nil
 }
 
 func getLoggerLevel(level string) slog.Level {
