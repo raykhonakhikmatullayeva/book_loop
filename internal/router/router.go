@@ -1,6 +1,7 @@
 package router
 
 import (
+	"book_loop/internal/handler/auth"
 	"context"
 	"net/http"
 
@@ -12,7 +13,7 @@ import (
 	_ "book_loop/docs"
 )
 
-func New(ctx context.Context, pool *pgxpool.Pool) (*gin.Engine, error) {
+func New(ctx context.Context, pool *pgxpool.Pool, authHandler auth.Handler) (*gin.Engine, error) {
 	engine := gin.New()
 	engine.Use(gin.Logger(), gin.Recovery())
 
@@ -29,5 +30,11 @@ func New(ctx context.Context, pool *pgxpool.Pool) (*gin.Engine, error) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
 	api.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
+	authGroup := api.Group("/auth")
+	{
+		authGroup.POST("/register", authHandler.Register)
+		authGroup.POST("/login", authHandler.Login)
+		authGroup.POST("/refresh", authHandler.Refresh)
+	}
 	return engine, nil
 }

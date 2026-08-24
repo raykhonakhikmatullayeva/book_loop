@@ -15,11 +15,12 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
 )
+
 const (
-	accessTokenExp = 15 * time.Minute
-	refreshBuf = 32
+	accessTokenExp    = 15 * time.Minute
+	refreshBuf        = 32
 	passwordMinLength = 8
-	loginMinLength = 3
+	loginMinLength    = 3
 )
 
 type service struct {
@@ -29,10 +30,18 @@ type service struct {
 }
 
 type Service interface {
+	Register(ctx context.Context, login, password, role string) error
+	Login(ctx context.Context, login, password string) (model.Token, error)
+	Refresh(ctx context.Context, rawToken string) (model.Token, error)
+	newAccessToken(userID int64, role string) (string, error)
+	newRefreshToken(ctx context.Context, userID int64) (string, error)
 }
 
-func NewService(userRepo users.Repo, jwtSecret []byte) Service {
-	return &service{userRepo: userRepo, jwtSecret: jwtSecret}
+func NewService(userRepo users.Repo, authRepo auth.Repo, jwtSecret []byte) Service {
+	return &service{
+		userRepo: userRepo,
+		jwtSecret: jwtSecret,
+		authRepo: authRepo,}
 }
 
 func (s *service) Register(ctx context.Context, login, password, role string) error {
@@ -104,11 +113,49 @@ func (s *service) newRefreshToken(ctx context.Context, userID int64) (string, er
 	if err != nil {
 		return "", fmt.Errorf("generate refresh token: %w", err)
 	}
-	hash := sha256.Sum256([]byte(raw))
-	hashStr := hex.EncodeToString(hash[:])
-	err = s.authRepo.SaveRefresh(ctx,userID, hashStr, time.Now().Add(7*24 * time.Hour))
+	hash := hashToken(raw)
+	err = s.authRepo.SaveRefresh(ctx, userID, hash, time.Now().Add(7*24*time.Hour))
 	if err != nil {
 		return "", fmt.Errorf("save refresh token: %w", err)
 	}
 	return raw, nil
+}
+
+func (s *service) Refresh(ctx context.Context, rawToken string) (model.Token, error) {
+	hash := hashToken(rawToken)
+	token, err := s.authRepo.GetByHash(ctx, hash)
+	if err != nil {
+		return model.Token{}, fmt.Errorf("get refresh token: %w", err)
+	}
+	if token.Revoked {
+		return model.Token{}, model.ErrTokenRevoked
+	}
+	if time.Now().After(token.ExpiresAt) {
+		return model.Token{}, model.ErrTokenExpired
+	}
+	err = s.authRepo.Revoke(ctx, hash)
+	if err != nil {
+		return model.Token{}, fmt.Errorf("revoke refresh token: %w", err)
+	}
+	if err := s.authRepo.Revoke(ctx, hash); err != nil {
+		return model.Token{}, fmt.Errorf("revoke refresh token: %w", err)
+	}
+	u, err := s.userRepo.GetUserByID(ctx, token.UserID)
+	if err != nil {
+		return model.Token{}, fmt.Errorf("get user by id: %w", err)
+	}
+	accessToken, err := s.newAccessToken(token.UserID, u.Role)
+	if err != nil {
+		return model.Token{}, fmt.Errorf("create access token: %w", err)
+	}
+	refreshToken, err := s.newRefreshToken(ctx, token.UserID)
+	if err != nil {
+		return model.Token{}, fmt.Errorf("create refresh token: %w", err)
+	}
+	return model.Token{AccessToken: accessToken, RefreshToken: refreshToken}, nil
+}
+
+func hashToken(raw string) string {
+	sum := sha256.Sum256([]byte(raw))
+	return hex.EncodeToString(sum[:])
 }

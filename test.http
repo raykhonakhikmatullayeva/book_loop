@@ -1,0 +1,36 @@
+@url = http://localhost:9999/api/v1
+###
+POST {{url}}/auth/register
+Content-Type: application/json
+
+{
+  "login": "user1",
+  "password": "password123",
+  "role": "user"
+}
+
+###
+POST {{url}}/auth/login
+Content-Type: application/json
+
+{
+"login": "user1",
+"password": "password123"
+}
+
+> {%
+    client.test("Login success", function () {
+        client.assert(response.status === 200);
+    });
+
+    client.global.set("accessToken", response.body.access_token);
+    client.global.set("refreshToken", response.body.refresh_token);
+%}
+
+###
+POST {{url}}/auth/refresh
+Content-Type: application/json
+
+{
+  "refresh_token": "{{refreshToken}}"
+}
